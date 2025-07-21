@@ -1,6 +1,7 @@
 import pandas as pd
 df = pd.read_csv('cohort.csv')
 df.drop(columns=['report_15', 'report_16', 'report_17'], inplace=True)
+df = df.dropna(axis=1, how='all')
 report_cols = [c for c in df.columns if c.startswith("report_")]
 
 '''this code creates new boolean columns depending on whether the select keyword appears within report_1-report_14 in the MIMIC machine measurements CSV'''
