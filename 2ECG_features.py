@@ -4,16 +4,18 @@ import numpy as np, pandas as pd
 from scipy.signal import welch
 from scipy.stats  import skew, kurtosis
 import pandas as pd
-df = pd.read_csv('cohort.csv')
+
 SR = 500            # Hz
 ECG_LEN = 10 * SR   # 5 000 samples / lead (10-s strip)
-
+df = pd.read_csv('cohort.csv')
+df1 = pd.read_csv('final_df.csv')
 ms  = lambda s: s * 1000 / SR        # samples → ms
 amp = lambda sig, i: sig[i]          # amplitude helper
 safe = lambda d, k: d.get(k, [])     # missing-key helper
 import numpy as np
 
 
+df = df[df['path'].isin(df1['path'])]  # filter cohort to only those in final_df
 
 def ecg_features_one_record(rec_path: str) -> pd.DataFrame:
     """Return a single-row DataFrame of 281 ECG features for one WFDB record."""
@@ -87,19 +89,26 @@ def ecg_features_one_record(rec_path: str) -> pd.DataFrame:
         qrs_d, r_d, st_d, stseg_d, t_d, tpseg_d, p_d = [], [], [], [], [], [], []
         qt_d, qtseg_d, qtcseg_d, jt_d, tp_toff_d, rr_d, pr_d = [], [], [], [], [], [], []
         area_qrs, slope_st, skew_rs, idx_t = [], [], [], []
-
+        baseline = np.zeros(n)  # baseline for each beat
         for i in range(n):
             q, s = q_pk[i], s_pk[i]
             ron, roff, r = r_on[i], r_off[i], r_pk[i]
             ton, t, toff = t_on[i], t_pk[i], t_off[i]
             pon, pp, poff = p_on[i], p_pk[i], p_off[i]
-
+            if not np.isnan(poff) and not np.isnan(q) and q - poff > 0:
+                baseline[i] = (np.median(clean[poff:q]))
+            elif not np.isnan(poff) and np.isnan(q):
+                baseline[i] = (np.median(clean[poff: poff + 10]))
+            elif not np.isnan(q):
+                baseline[i] = (np.median(clean[q - 10:q]))
+            else:
+                continue  # skip this beat if no baseline
             # --------------- amplitudes (need just one idx each) -----------
-            if not np.isnan(q):   aq.append(amp(clean, q))
-            if not np.isnan(r):   ar.append(amp(clean, r))
-            if not np.isnan(s):   as_.append(amp(clean, s))
-            if not np.isnan(t):   at.append(amp(clean, t))
-            if not np.isnan(pp):  ap.append(amp(clean, pp))
+            if not np.isnan(q):   aq.append(abs(amp(clean, q) - baseline[i]))
+            if not np.isnan(r):   ar.append(abs(amp(clean, r) - baseline[i]))
+            if not np.isnan(s):   as_.append(abs(amp(clean, s) - baseline[i]))
+            if not np.isnan(t):   at.append(abs(amp(clean, t) - baseline[i]))
+            if not np.isnan(pp):  ap.append(abs(amp(clean, pp) - baseline[i]))
 
             # --------------- durations -------------------------------------
             # QRS (Qpk→Spk)
@@ -171,16 +180,17 @@ def ecg_features_one_record(rec_path: str) -> pd.DataFrame:
 
 
         m   = lambda x: np.nan if len(x)==0 else float(np.mean(x))
+        md  = lambda x: np.nan if len(x)==0 else float(np.median(x))
         sdx = lambda x: np.nan if len(x)==0 else float(np.std(x))
 
         per_lead_rows.append({
             "lead": lead,
             # amplitudes (6 + 2 ratios + 4 extras)
-            "mean_Q": m(aq), "mean_R": m(ar), "mean_S": m(as_),
-            "mean_T": m(at), "mean_P": m(ap),
-            "R_S_ratio": m(np.abs(ar)) / m(np.abs(as_) + 1e-6),
-            "T_R_ratio": m(np.abs(at)) / m(np.abs(ar) + 1e-6),
-            "QRS_area": m(area_qrs), "ST_slope": m(slope_st),
+            "mean_Q": md(aq), "mean_R": md(ar), "mean_S": md(as_),
+            "mean_T": md(at), "mean_P": md(ap),
+            "R_S_ratio": md(np.abs(ar)) / md(np.abs(as_) + 1e-6),
+            "T_R_ratio": md(np.abs(at)) / md(np.abs(ar) + 1e-6),
+            "QRS_area": md(area_qrs), "ST_slope": m(slope_st),
             "RS_skew": m(skew_rs),   "T_index": m(idx_t),
             # durations (12)
             "dur_QSpk": m(qrs_d), "dur_R": m(r_d), "dur_STpk": m(st_d),
@@ -206,22 +216,39 @@ def ecg_features_one_record(rec_path: str) -> pd.DataFrame:
     df_wide = pd.DataFrame([wide])
 
     # ───────── 4) global dispersion / variability ─────────
-    df_global = pd.DataFrame([{
+    df_globals = pd.DataFrame([{
         "QT_dispersion":  df_leads["dur_QT"].max()  - df_leads["dur_QT"].min(),
         "QRS_dispersion": df_leads["dur_QSpk"].max() - df_leads["dur_QSpk"].min(),
-        "sd_QT": df_leads["sd_QT"].mean(skipna=True),
-        "sd_RR": df_leads["sd_RR"].mean(skipna=True),
-        "sd_TpToff": df_leads["sd_TpToff"].mean(skipna=True)
     }])
+    duration_cols = [col for col in df_leads.columns if col.startswith('dur_') or col.startswith('sd_') or col.startswith('T_index')]
+
+    # Compute mean across leads, skipping NaNs
+    global_means = df_leads[duration_cols].mean(axis=0, skipna=True)
+
+    # Rename indices to indicate global mean
+    global_means.index = [f"{col}" for col in duration_cols]
+
+    # Create a one-row DataFrame for global features
+    df_global = pd.DataFrame([global_means.to_dict()])
+    drop_cols = []
+    for col in duration_cols:
+        for lead in df_leads.index:
+            drop_cols.append(f"{col}_{lead}")
+    df_wide = df_wide.drop(columns=drop_cols, errors="ignore")
 
     # ───────── 5) concatenate & return ─────────
-    return pd.concat([df_wide, df_global], axis=1)
+    return pd.concat([df_wide, df_global, df_globals], axis=1)
+pd.set_option('display.max_columns', None)
+
+
+
+
 
 feature_list = []
 total = len(df)                           # total number of ECGs
 for idx, path in enumerate(df['path'], 1):
     print(f"[{idx:>4}/{total}] {path}")   # progress line
-    feat = ecg_features_one_record(f"physionet.org/{path}") #path (*may need to be changed*)      
+    feat = ecg_features_one_record(f"data/mimic-iv-ecg/{path}/{path[-8:]}") #path (*may need to be changed*)      
     if feat is None:                       # <<< added
         continue  
     feat['path'] = path                   # tag the features with its source path
@@ -236,6 +263,3 @@ df_combined = df.merge(features_df, on='path', how='left')
 
 # 5) Save to a new CSVs
 df_combined.to_csv('cohort.csv', index=False)
-
-
-
