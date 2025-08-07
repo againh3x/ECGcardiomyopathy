@@ -1,6 +1,6 @@
 import pandas as pd
-df = pd.read_csv('cohort.csv')
-df.drop(columns=['report_15', 'report_16', 'report_17'], inplace=True)
+df = pd.read_csv('full_cohort.csv')
+df.drop(columns=['report_15', 'report_16', 'report_17'], inplace=True, errors='ignore')
 df = df.dropna(axis=1, how='all')
 report_cols = [c for c in df.columns if c.startswith("report_")]
 
@@ -134,6 +134,11 @@ df["RBBB"] = joined_reports.apply(
     lambda txt: any(p in txt for p in phrases)
 )
 
+phrases = ['IVCD', 'intraventricular conduction']
+df["IVCD"] = joined_reports.apply(
+    lambda txt: any(p in txt for p in phrases)
+)
+
 #left anterior fascicular block
 phrases = ['lafb', 'left anterior fas']
 df["LAFB"] = joined_reports.apply(
@@ -181,6 +186,8 @@ df["SVR"] = joined_reports.apply(
     lambda txt: any(p in txt for p in phrases)
 )
 
+phrases = ['infarct, recent', 'infarct, acute', ]
+
 #remove paced ECGs
 print("Original Length:" , len(df))
 phrases = ['pace', 'pacing']
@@ -198,53 +205,4 @@ df["Faulty ECG"] = joined_reports.apply(
 df = df[df['Faulty ECG'] == False]
 print("After removing low-quality ECGs:" , len(df))
 
-
-#remove overlap patients (both HCM + DCM ICD diagnoses anywhere within MIMIC-IV history)
-
-diag = pd.read_csv('data/diagnoses_icd.csv.gz', compression='gzip', header=0, sep=',', quotechar='"')
-icd_dcm = ['I420', 'I426', '4255', '4257']          # Dilated CM
-icd_hcm = ['4251', '42511', 'I421', 'I422', '42518']  # Hypertrophic CM
-dcm_set = set(icd_dcm)
-hcm_set = set(icd_hcm)
-code_col_candidates = [c for c in diag.columns if 'icd' in c.lower() and 'code' in c.lower()]
-if not code_col_candidates:
-    raise ValueError("Could not auto-detect an ICD code column in diagnoses file.")
-code_col = code_col_candidates[0]
-
-
-
-# 4. Normalize codes: uppercase + remove dots (non-destructive)
-
-diag["code_norm"] = (
-    diag[code_col]
-        .astype(str)
-        .str.strip()
-        .str.replace('.', '', regex=False)
-        .str.upper()
-)
-
-# Keep only rows whose normalized code is in either set (speeds up aggregation)
-diag_sub = diag[diag["code_norm"].isin(dcm_set.union(hcm_set))][["subject_id", "code_norm"]]
-
-# Aggregate: for each subject, check presence in each set
-subject_flags = (
-    diag_sub
-      .groupby("subject_id")["code_norm"]
-      .agg(lambda codes: pd.Series(codes).isin(dcm_set).any())
-      .to_frame("has_dcm")
-)
-
-subject_flags["has_hcm"] = (
-    diag_sub.groupby("subject_id")["code_norm"]
-            .agg(lambda codes: pd.Series(codes).isin(hcm_set).any())
-)
-# 6. Overlap subjects = have both DCM and HCM codes
-overlap_subjects = subject_flags.index[subject_flags["has_dcm"] & subject_flags["has_hcm"]]
-n_overlap = len(overlap_subjects)
-print(f"Overlap subjects (≥1 DCM AND ≥1 HCM code): {n_overlap}")
-before_rows = len(df)
-df_clean = df[~df["subject_id"].isin(overlap_subjects)].copy()
-after_rows = len(df_clean)
-print(f"Rows after removing overlap subjects: {after_rows}")
-
-df_clean.to_csv('cohort.csv', index=False)
+df.to_csv('full_cohort.csv', index=False)
