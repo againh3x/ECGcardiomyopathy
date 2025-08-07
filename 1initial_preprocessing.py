@@ -19,29 +19,31 @@ patientdf = pd.read_csv('data/patients.csv.gz', compression='gzip', header=0, se
 admdf = pd.read_csv('data/admissions.csv.gz', compression='gzip', header=0, sep=',', quotechar='"')
 df = pd.read_csv('data/diagnoses_icd.csv.gz', compression='gzip', header=0, sep=',', quotechar='"')
 recdf = pd.read_csv('data/record_list.csv', dtype=dtype_spec)
+notes = pd.read_csv('data/discharge.csv.gz', compression='gzip', header=0, sep=',', quotechar='"')
 
 ECG_df['ecg_time'] = pd.to_datetime(ECG_df['ecg_time']).dt.date
 admdf['admittime'] = pd.to_datetime(admdf['admittime']).dt.date
 admdf['dischtime'] = pd.to_datetime(admdf['dischtime']).dt.date
 
-
+icd_icm = ['I255']
 
 icd_dcm = ['I420', 'I426', '4255', '4257']                       # Dilated CM
 icd_hcm = ['4251', '42511', 'I421', 'I422', '42518']            # Hypertrophic CM
 
 # Keep only DCM + HCM rows, then flag the dilated ones
 df = (
-    df[df['icd_code'].isin(icd_dcm + icd_hcm)]     # one dataframe “on top of another”
+    df[df['icd_code'].isin(icd_dcm + icd_hcm + icd_icm)]     # one dataframe “on top of another”
       .copy()
 )
-df['Dilated'] = df['icd_code'].isin(icd_dcm)  # True = DCM, False = HCM
-
+df['Dilated'] = df['icd_code'].isin(icd_dcm + icd_icm)  # True = DCM, False = HCM
+df['Ischemic'] = df['icd_code'].isin(icd_icm)  # True = ICM, False = non-ICM
 # Optional sanity‑checks
 print("DCM subjects :", len(df[df['Dilated']].subject_id.unique()))
+print("Ischemic subjects :", len(df[df['Ischemic']].subject_id.unique()))
 print("HCM subjects :", len(df[~df['Dilated']].subject_id.unique()))
 
 dilated_lookup = (
-    df[['hadm_id', 'Dilated']]
+    df[['hadm_id', 'Dilated', "Ischemic"]]
       .drop_duplicates()          # In case the same admission has multiple ICD rows
 )
 
@@ -57,6 +59,8 @@ df = df[(df['ecg_time'] >= df['admittime']) & (df['ecg_time'] <= df['dischtime']
 
 print("DCM subjects :", len(df[df['Dilated']].subject_id.unique()))
 print("HCM subjects :", len(df[~df['Dilated']].subject_id.unique()))
+print("ICM subjects :", len(df[df['Ischemic']].subject_id.unique()))
+
 
 df = pd.merge(df, patientdf,     left_on=['subject_id'], right_on=['subject_id'], how='left')
 
@@ -70,4 +74,19 @@ df = pd.merge(df, recdf, on='study_id')
 
 
 display(df.head())
-df.to_csv('cohort.csv')
+#df.to_csv('full_cohort.csv')
+
+print(len(df))
+print(len(df['hadm_id'].unique()))
+notes = notes[notes['hadm_id'].isin(df['hadm_id'].unique())]
+
+notes = notes[['hadm_id', 'subject_id', 'text']].copy()
+print(len(notes))
+note_df = pd.merge(df[['hadm_id', 'Dilated']], notes, on=['hadm_id'], how='right')
+print(len(note_df))
+
+note_df.drop_duplicates(inplace=True)
+print("Final cohort size:", len(note_df))
+note_df.to_csv('discharge_notes.csv', index=False)
+
+
