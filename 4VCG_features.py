@@ -10,7 +10,7 @@ import matplotlib.pyplot as plt
 import pandas as pd
 # ----- Constants -----
 FS      = 500
-PRE_MS  = 250
+PRE_MS  = 400
 POST_MS = 450
 MIN_QRS = 60
 MAX_QRS = 200
@@ -18,7 +18,7 @@ MIN_T   = 80
 
 
 #initialize A-ECG columns
-df = pd.read_csv('cohort.csv')
+df = pd.read_csv('full_cohort.csv')
 df['qrs_duration'] = df['qrs_end'] - df['qrs_onset']
 #chosen Kors regression matrix 
 KORS_3x8 = np.array([
@@ -49,6 +49,7 @@ def collect_relative_offsets_direct(r_peaks, waves, fs, path, lead_name=None):
    Returns robust (median) relative offsets.
    """
    arr = lambda k: np.array(waves.get(k, []), dtype=float)
+   Pon = arr("ECG_P_Onsets")
    Poff = arr("ECG_P_Offsets")
    Qpk  = arr("ECG_Q_Peaks")
    Ron  = arr("ECG_R_Onsets")     # fused
@@ -59,7 +60,7 @@ def collect_relative_offsets_direct(r_peaks, waves, fs, path, lead_name=None):
    Tpk  = arr("ECG_T_Peaks")
 
 
-   n = min(len(r_peaks), len(Qpk), len(Spk), len(Ron), len(Roff), len(Ton), len(Toff), len(Poff))
+   n = min(len(r_peaks), len(Qpk), len(Spk), len(Ron), len(Roff), len(Ton), len(Toff))
    if n == 0:
        return None
 
@@ -80,7 +81,9 @@ def collect_relative_offsets_direct(r_peaks, waves, fs, path, lead_name=None):
        q_peak = Qpk[i]; s_peak = Spk[i]
        r_on   = Ron[i]; r_off  = Roff[i]
        t_on   = Ton[i]; t_off  = Toff[i]
-       p_off  = Poff[i]; t_peak = Tpk[i]
+       t_peak = Tpk[i]
+       p_on  = Pon[i]  if i < len(Pon)  else np.nan
+       p_off = Poff[i] if i < len(Poff) else np.nan
        q_on = np.nan
        q_off = np.nan
        mimic_end = q_peak + qrs_duration * 1000 / fs
@@ -152,11 +155,11 @@ def collect_relative_offsets_direct(r_peaks, waves, fs, path, lead_name=None):
                     current_lead_signal[j] > amplitude_threshold_T):
                     q_off = j
                     found_q_off = True
-                    print(f"Found q_off by forward search at {j} for beat {i} in {lead_name}")
+                    #print(f"Found q_off by forward search at {j} for beat {i} in {lead_name}")
                     break
             
             if not found_q_off:
-                print(f"Couldn't find q_off by forward search for beat {i} in {lead_name}")
+                #print(f"Couldn't find q_off by forward search for beat {i} in {lead_name}")
                 if t_on > s_peak + 10:
                     q_off = int(s_peak + 10)
                 else:
@@ -177,24 +180,37 @@ def collect_relative_offsets_direct(r_peaks, waves, fs, path, lead_name=None):
        if np.isnan(q_off) or np.isnan(q_on) or np.isnan(t_on) or np.isnan(t_off):
             continue
 
-       rels.append({
-            "q_on_rel":  q_on  - r_peaks[i],
-            "q_off_rel": q_off - r_peaks[i],
-            "t_on_rel":  t_on  - r_peaks[i],
-            "t_off_rel": t_off - r_peaks[i]
-        })
+       rel = {                       # ←  keep the beat
+        "q_on_rel": q_on  - r_peaks[i],
+        "q_off_rel": q_off - r_peaks[i],
+        "t_on_rel": t_on  - r_peaks[i],
+        "t_off_rel": t_off - r_peaks[i],
+        "p_on_rel": p_on - r_peaks[i] if not np.isnan(p_on) else np.nan,
+        "p_off_rel": p_off - r_peaks[i] if not np.isnan(p_off) else np.nan
+        }
+
+       rels.append(rel)
 
    if not rels:
         return None
 
    def robust(key):
-        v = np.array([r[key] for r in rels])
+        v = np.asarray([r[key] for r in rels], dtype=float)
+
+        # If everything is NaN, just return NaN
+        if np.all(np.isnan(v)):
+            return np.nan
+
+        # Drop NaNs before IQR filtering
+        v = v[~np.isnan(v)]
         if v.size < 3:
-            return int(np.median(v))
+            return float(np.median(v))
+
         q1, q3 = np.percentile(v, [25, 75])
         iqr = q3 - q1
-        mask = (v >= q1 - 1.5*iqr) & (v <= q3 + 1.5*iqr)
-        return int(np.median(v[mask]))
+        good = (v >= q1 - 1.5*iqr) & (v <= q3 + 1.5*iqr)
+        return float(np.median(v[good]))
+
 
    def top75_off():
         v = np.array([r["q_off_rel"] for r in rels])
@@ -210,6 +226,8 @@ def collect_relative_offsets_direct(r_peaks, waves, fs, path, lead_name=None):
         "q_off_rel": top75_off(),
         "t_on_rel":  robust("t_on_rel"),
         "t_off_rel": robust("t_off_rel"),
+        "p_on_rel":  robust("p_on_rel"),
+        "p_off_rel": robust("p_off_rel"),
         "n_beats_used": len(rels),
         "baseline": baseline,
         "baselineT": baselineT
@@ -259,8 +277,87 @@ def build_mean_beat(ecg12, r_peaks, waves, fs, pre_ms=PRE_MS, post_ms=POST_MS,
     mean12 = np.stack(segs, axis=0).mean(axis=0)
     return mean12, pre, np.array(kept_r)
 
+def compute_p_vcg_features(X, Y, Z,
+                           p_on, p_off,
+                           mean_QRS_vec, V_Q_peak,
+                           fs):
+    """
+    Return a dict with P‑loop A‑ECG features.
+    Every amplitude is already in mV.
+    """
+    # ─────────────────────────────────── validity
+    if np.isnan(p_on) or np.isnan(p_off) or p_off <= p_on + int(0.04 * fs):
+        return {}          # no valid P loop
 
-def compute_vcg_features(X, Y, Z, q_on, q_off, t_on, t_off, fs):
+    # ─────────────────────────────────── build P matrices
+    P_xyz = np.vstack([X[p_on:p_off],
+                       Y[p_on:p_off],
+                       Z[p_on:p_off]]).T            # shape (N,3)
+    P_mag = np.linalg.norm(P_xyz, axis=1)
+
+    # ─────────────────────────────────── centre the loop *** FIXED ***
+    P_centered = P_xyz - P_xyz.mean(axis=0, keepdims=True)
+
+    # mean & peak vectors AFTER centring
+    mean_P_vec = P_centered.mean(axis=0)
+    mean_P_vec /= (np.linalg.norm(mean_P_vec) + 1e-12)
+
+    p_peak_idx = p_on + np.argmax(P_mag)
+    V_P_peak   = np.array([X[p_peak_idx],
+                           Y[p_peak_idx],
+                           Z[p_peak_idx]])
+
+    # ─────────────────────────────────── SVD on the centred loop
+    Up, Sp, Vp = np.linalg.svd(P_centered, full_matrices=False)
+
+    # ─────────────────────────────────── helpers …
+    def azimuth_deg(v):   return np.degrees(np.arctan2(v[1], v[0]))
+    def elevation_deg(v): return np.degrees(np.arctan2(v[2],
+                                    np.linalg.norm(v[:2]) + 1e-12))
+    def vec_angle_deg(a, b):
+        c = np.clip(np.dot(a, b) /
+                    (np.linalg.norm(a) * np.linalg.norm(b) + 1e-12),
+                    -1, 1)
+        return np.degrees(np.arccos(c))
+    def loop_area_2d(x, y):
+        return 0.5 * np.abs(np.dot(x, np.roll(y, -1)) -
+                            np.dot(y, np.roll(x, -1)))
+
+    # ─────────────────────────────────── loop‑shape metrics
+    Yp, Zp = P_centered[:, 1], P_centered[:, 2]      # already centred
+    rl_mask = (Yp < 0) & (Zp < 0)
+    total_area = loop_area_2d(Yp, Zp)
+    pct_rl = (loop_area_2d(Yp[rl_mask], Zp[rl_mask]) /
+              (total_area + 1e-12) * 100.0) if rl_mask.any() else 0.0
+
+    # ─────────────────────────────────── feature dict
+    featsP = {
+        "P_axis_azimuth_deg":          azimuth_deg(mean_P_vec),
+        "P_axis_elevation_deg":        elevation_deg(mean_P_vec),
+
+        "spatial_peak_P_QRS_angle_deg":
+            vec_angle_deg(V_P_peak, V_Q_peak),
+        "spatial_mean_P_QRS_angle_deg":
+            vec_angle_deg(mean_P_vec, mean_QRS_vec),
+
+        "time_voltage_P_mVms":
+            np.trapz(P_mag, dx=1 / fs) * 1000.0,
+
+        "ratio_P_max_to_mean":
+            np.max(P_mag) / (np.mean(P_mag) + 1e-12),
+
+        "ln_amp_dipolar_P_ln_mV": np.log(max(Sp[0], 1e-12)),
+        "norm_amp_e2_P":          Sp[1] / Sp[0] if len(Sp) > 1 else np.nan,
+        "ln_amp_e3_P_ln_mV":
+            np.log(max(Sp[2], 1e-12)) if len(Sp) > 2 else np.nan,
+
+        "pct_P_area_RL_sagittal_percent": pct_rl
+    }
+    return featsP
+
+
+
+def compute_vcg_features(X, Y, Z, q_on, q_off, t_on, t_off, p_on=None,p_off=None, fs=FS):
     """
     Compute a comprehensive set of VCG features from 3D (X,Y,Z) loops.
     Inputs
@@ -309,7 +406,7 @@ def compute_vcg_features(X, Y, Z, q_on, q_off, t_on, t_off, fs):
     def trapz_time(voltage_array):
         # Time-voltage integral in mV*ms (assuming mV input)
         # trapz integral -> area (mV*s), multiply by 1000 for mV*ms
-        return np.trapezoid(voltage_array, dx=1.0 / fs) * 1000.0
+        return np.trapz(voltage_array, dx=1.0 / fs) * 1000.0
 
     def azimuth_deg(v):
         # Azimuth angle (XY plane) in degrees: atan2(Y, X)
@@ -436,8 +533,8 @@ def compute_vcg_features(X, Y, Z, q_on, q_off, t_on, t_off, fs):
     # 5) Ventricular gradient (VG)  #
     # ------------------------------#
     # VG = integral(QRS_vec) + integral(T_vec) over their segments
-    QRS_int = np.trapezoid(QRS_xyz, dx=1.0 / fs, axis=0)  # vector in mV*s
-    T_int   = np.trapezoid(T_xyz,   dx=1.0 / fs, axis=0)
+    QRS_int = np.trapz(QRS_xyz, dx=1.0 / fs, axis=0)  # vector in mV*s
+    T_int   = np.trapz(T_xyz,   dx=1.0 / fs, axis=0)
     VG_vec  = QRS_int + T_int                                    # vectorial sum
     VG_mag  = norm(VG_vec) * 1000.0                               # mV*ms
 
@@ -464,7 +561,8 @@ def compute_vcg_features(X, Y, Z, q_on, q_off, t_on, t_off, fs):
     # ------------------------------#
     # 6) Eigen-based log/ratios     #
     # ------------------------------#
-    ln_e3_T = np.log(max(norm(e3_T) * dip_T, 1e-12))                # (7) Ln µV
+    ln_e3_T = np.log(max(St[2], 1e-12))   # St is the vector of singular values
+    # (7) Ln µV
     # (approx amplitude: using dip_T as scale; feel free to adjust)
 
     # Normalized second eigenvector amplitudes
@@ -557,6 +655,9 @@ def compute_vcg_features(X, Y, Z, q_on, q_off, t_on, t_off, fs):
     X_T_s = project_to_plane(T_xyz.T, "sagittal")
     angles_T_s = np.arctan2(X_T_s[1], X_T_s[0])
     sin_max_T_s = np.sin(angles_T_s[np.argmax(np.abs(angles_T_s))])     # (30)
+
+
+
 
     # --------------------------------------#
     # 8) Assemble feature dictionary        #
@@ -660,17 +761,28 @@ def compute_vcg_features(X, Y, Z, q_on, q_off, t_on, t_off, fs):
         "t_peak_idx": t_peak_idx
     }
 
+    p_feats = {}
+    if p_on is not None and p_off is not None:
+        p_feats = compute_p_vcg_features(
+            X, Y, Z, p_on, p_off,
+            mean_QRS_vec, V_Q_peak, fs
+        ) 
+    feats.update(p_feats)
+
     return feats
 
 
 
 
 
-def plot_vcg(X, Y, Z, q_on_idx, q_off_idx, t_on_idx, t_off_idx,
-            q_peak_idx, t_peak_idx):
+def plot_vcg(X, Y, Z, q_on_idx, q_off_idx, t_on_idx, t_off_idx, p_on_idx=None, p_off_idx=None,
+            q_peak_idx=None, t_peak_idx=None):
    mag = np.sqrt(X**2 + Y**2 + Z**2)
    fig, axes = plt.subplots(1, 2, figsize=(11,4))
    ax = axes[0]
+   if not np.isnan(p_on_idx):
+        ax.plot(X[p_on_idx:p_off_idx], Y[p_on_idx:p_off_idx],
+                color='blue', label='P loop') 
    ax.plot(X[q_on_idx:q_off_idx], Y[q_on_idx:q_off_idx],
            color='green', label='QRS loop')
    ax.plot(X[t_on_idx:t_off_idx], Y[t_on_idx:t_off_idx],
@@ -748,7 +860,7 @@ def fuse_r_on_off(prom_waves, dwt_waves):
 
 
 def plot_all_mean_beats_grid(mean12, lead_order, fs, r_index,
-                           q_on_idx, q_off_idx, t_on_idx, t_off_idx,
+                           q_on_idx, q_off_idx, t_on_idx, t_off_idx, p_on_idx=None, p_off_idx=None, 
                            title="Mean Beats with Median Boundaries"):
     """
     Plots the mean beat for all leads in a grid layout with median boundaries highlighted.
@@ -778,11 +890,18 @@ def plot_all_mean_beats_grid(mean12, lead_order, fs, r_index,
                   (t_off_idx - r_index)*1000/fs,
                   color='orange', alpha=0.20, label='T')
         
-        # Boundary lines
+        if not np.isnan(p_on_idx) and not np.isnan(p_off_idx):
+            ax.axvspan((p_on_idx - r_index)*1000/fs,
+                       (p_off_idx - r_index)*1000/fs,
+                       color='blue', alpha=0.15, label='P')
+
+        # Boundary lines (add P boundaries)
         for x, c in [(q_on_idx,'green'), (q_off_idx,'green'),
-                     (t_on_idx,'orange'), (t_off_idx,'orange')]:
-            ax.axvline((x - r_index)*1000/fs, color=c, linestyle='--', linewidth=1)
-        
+                     (t_on_idx,'orange'), (t_off_idx,'orange'),
+                     (p_on_idx,'blue'),  (p_off_idx,'blue')]:
+            if not np.isnan(x):
+                ax.axvline((x - r_index)*1000/fs, color=c,
+                           linestyle='--', linewidth=1)
         # R-peak line
         ax.axvline(0, color='k', linestyle=':', linewidth=1, label='R peak')
         
@@ -804,7 +923,7 @@ def plot_all_mean_beats_grid(mean12, lead_order, fs, r_index,
 
 def extract_and_visualize_vcg(ecg_path, pvc_flag, qrs_thresh_ms,
                             lead_order=["I","II","V1","V2","V3","V4","V5","V6"],
-                            fs=FS, visualize=True):
+                            fs=FS, no_p_waves=False, visualize=True):
     """
     Extracts VCG features and visualizes:
     1. Raw V5 ECG
@@ -819,6 +938,8 @@ def extract_and_visualize_vcg(ecg_path, pvc_flag, qrs_thresh_ms,
     all_q_off_rel = []
     all_t_on_rel = []
     all_t_off_rel = []
+    all_p_on_rel = []
+    all_p_off_rel = []
     
     # --- Plot raw V5 ECG (full 10 s strip) ---
     v5_idx = lead_order.index("V5")
@@ -912,6 +1033,7 @@ def extract_and_visualize_vcg(ecg_path, pvc_flag, qrs_thresh_ms,
         offsets = collect_relative_offsets_direct(
             r_peaks,
             {
+                "ECG_P_Onsets": waves_fused.get("ECG_P_Onsets", []),
                 "ECG_P_Offsets": waves_fused.get("ECG_P_Offsets", []),
                 "ECG_Q_Peaks": waves_fused.get("ECG_Q_Peaks", []),
                 "ECG_R_Onsets": waves_fused.get("ECG_R_Onsets", []),
@@ -930,7 +1052,13 @@ def extract_and_visualize_vcg(ecg_path, pvc_flag, qrs_thresh_ms,
             all_q_off_rel.append(offsets["q_off_rel"])
             all_t_on_rel.append(offsets["t_on_rel"])
             all_t_off_rel.append(offsets["t_off_rel"])
-    
+            if not no_p_waves:
+                all_p_on_rel.append(offsets["p_on_rel"])
+                all_p_off_rel.append(offsets["p_off_rel"])
+            else:
+                all_p_on_rel.append(np.nan)
+                all_p_off_rel.append(np.nan)
+
     # If no valid offsets were found across any leads, return None
     if not all_q_on_rel:
         return None
@@ -940,6 +1068,12 @@ def extract_and_visualize_vcg(ecg_path, pvc_flag, qrs_thresh_ms,
     median_q_off_rel = int(np.median(all_q_off_rel))
     median_t_on_rel = int(np.median(all_t_on_rel))
     median_t_off_rel = int(np.median(all_t_off_rel))
+    if no_p_waves or np.all(np.isnan(all_p_on_rel)):
+        median_p_on_rel  = np.nan
+        median_p_off_rel = np.nan
+    else:
+        median_p_on_rel  = int(np.nanmedian(all_p_on_rel))
+        median_p_off_rel = int(np.nanmedian(all_p_off_rel))
     
     # Use V5 for final mean beat calculation (as in original code)
     v5_sig = ecg12[lead_order.index("V5")]
@@ -997,6 +1131,13 @@ def extract_and_visualize_vcg(ecg_path, pvc_flag, qrs_thresh_ms,
     q_off_idx = r_index + median_q_off_rel
     t_on_idx = r_index + median_t_on_rel
     t_off_idx = r_index + median_t_off_rel
+    if not no_p_waves:
+        p_on_idx = r_index + median_p_on_rel
+        p_off_idx = r_index + median_p_off_rel
+    else:
+        p_on_idx = np.nan
+        p_off_idx = np.nan
+
     if visualize:
     # Display all leads with median boundaries in a grid
         plot_all_mean_beats_grid(
@@ -1008,6 +1149,8 @@ def extract_and_visualize_vcg(ecg_path, pvc_flag, qrs_thresh_ms,
             q_off_idx, 
             t_on_idx, 
             t_off_idx,
+            p_on_idx,
+            p_off_idx,
             title=f"Mean Beats with Median Boundaries (QRS: {median_q_off_rel - median_q_on_rel}ms)"
         )
     
@@ -1015,7 +1158,9 @@ def extract_and_visualize_vcg(ecg_path, pvc_flag, qrs_thresh_ms,
     X, Y, Z = (KORS_3x8 @ mean12)
     features = compute_vcg_features(X, Y, Z,
                                   q_on_idx, q_off_idx,
-                                  t_on_idx, t_off_idx, fs)
+                                  t_on_idx, t_off_idx, 
+                                  p_on_idx, p_off_idx,
+                                  fs)
     
     if not features:
         return None
@@ -1025,6 +1170,7 @@ def extract_and_visualize_vcg(ecg_path, pvc_flag, qrs_thresh_ms,
             X, Y, Z,
             q_on_idx, q_off_idx,
             t_on_idx, t_off_idx,
+            p_on_idx, p_off_idx,
             features["q_peak_idx"], features["t_peak_idx"]
         )
     
@@ -1041,27 +1187,29 @@ rows_features = []
 for idx, row in tqdm(df.iterrows(), total=len(df), desc="Extracting VCG features"):
     pvc_flag      = bool(row.get("PVC", False))
     qrs_thresh_ms = 225
+    no_p = bool(row.get("Atrial Fibrillation", False) or
+                row.get("Atrial Flutter", False))
     path_str      = row["path"]
     ecg_path      = f'data/mimic-iv-ecg/{path_str}/{path_str[-8:]}'
 
-    try:
-        feats = extract_and_visualize_vcg(ecg_path, pvc_flag, qrs_thresh_ms,
-                                          visualize=False)  # turn off plotting in batch
+    try: 
+        feats = extract_and_visualize_vcg(
+                ecg_path, pvc_flag, qrs_thresh_ms, no_p_waves=no_p, visualize=False  # turn off plotting in batch
+            )
         if feats is None:
-            feats = {}
+                feats = {}
     except Exception as e:
         # In case of an error, fill NaNs for this row
         feats = {}
+
 
     # Ensure 'path' is retained for merging back
     feats["path"] = path_str
     rows_features.append(feats)
 
-# Build a DataFrame from the features list
+
 feat_df = pd.DataFrame(rows_features)
 
-# Merge back onto the original df by 'path'
-# (If multiple rows share a path, adjust as needed; here we assume one-to-one)
 df = df.merge(feat_df, on="path", how="left")
 df.drop(columns=['q_peak_idx', 't_peak_idx', '2116Unnamed: 0'], inplace=True, errors='ignore')
-df.to_csv('cohort.csv', index=False)
+df.to_csv('full_cohort.csv', index=False)
