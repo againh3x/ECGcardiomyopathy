@@ -74,7 +74,7 @@ df = pd.merge(df, recdf, on='study_id')
 
 
 display(df.head())
-#df.to_csv('full_cohort.csv')
+df.to_csv('full_cohort.csv')
 
 print(len(df))
 print(len(df['hadm_id'].unique()))
@@ -88,5 +88,6 @@ print(len(note_df))
 note_df.drop_duplicates(inplace=True)
 print("Final cohort size:", len(note_df))
 note_df.to_csv('discharge_notes.csv', index=False)
+
 
 
