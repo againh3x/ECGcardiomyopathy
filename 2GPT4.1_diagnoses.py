@@ -124,3 +124,15 @@ def main() -> None:
 # ---------------------------------------------------------------------#
 if __name__ == "__main__":
     main()
+    import pandas as pd
+    df = pd.read_csv('full_cohort.csv')
+    ai_df = pd.read_csv('classified_hadm.csv')
+    
+    df = df[df['hadm_id'].isin(ai_df['hadm_id'])]  # filter cohort to only those in classified_hadm
+    print(len(df))
+    df = pd.merge(df, ai_df, on='hadm_id', how='left')
+    print(len(df))
+    
+    df.drop_duplicates(inplace=True)
+    print("Final cohort size:", len(df))
+    df.to_csv('full_cohort.csv', index=False)
