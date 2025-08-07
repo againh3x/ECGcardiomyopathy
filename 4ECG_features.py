@@ -1,5 +1,5 @@
-
-import wfdb, neurokit2 as nk
+import wfdb
+import neurokit2 as nk
 import numpy as np, pandas as pd
 from scipy.signal import welch
 from scipy.stats  import skew, kurtosis
@@ -7,15 +7,15 @@ import pandas as pd
 
 SR = 500            # Hz
 ECG_LEN = 10 * SR   # 5 000 samples / lead (10-s strip)
-df = pd.read_csv('cohort.csv')
-df1 = pd.read_csv('final_df.csv')
+df = pd.read_csv('full_cohort.csv')
+
 ms  = lambda s: s * 1000 / SR        # samples → ms
 amp = lambda sig, i: sig[i]          # amplitude helper
 safe = lambda d, k: d.get(k, [])     # missing-key helper
 import numpy as np
 
 
-df = df[df['path'].isin(df1['path'])]  # filter cohort to only those in final_df
+
 
 def ecg_features_one_record(rec_path: str) -> pd.DataFrame:
     """Return a single-row DataFrame of 281 ECG features for one WFDB record."""
@@ -165,7 +165,7 @@ def ecg_features_one_record(rec_path: str) -> pd.DataFrame:
 
             # --------------- shape extras ----------------------------------
             if not np.isnan(q) and not np.isnan(s):
-                area_qrs.append(np.trapezoid(clean[q:s+1], dx=1 / SR))
+                area_qrs.append(np.trapz(clean[q:s+1], dx=1 / SR))
 
             if not np.isnan(ton) and not np.isnan(roff):
                 slope_st.append((amp(clean, ton) - amp(clean, roff)) /
@@ -244,22 +244,41 @@ pd.set_option('display.max_columns', None)
 
 
 
-feature_list = []
-total = len(df)                           # total number of ECGs
+feature_list   = []
+failed_paths   = []        # keep the offending paths (optional)
+failed_count   = 0
+total          = len(df)   # total number of ECGs
+
 for idx, path in enumerate(df['path'], 1):
-    print(f"[{idx:>4}/{total}] {path}")   # progress line
-    feat = ecg_features_one_record(f"data/mimic-iv-ecg/{path}/{path[-8:]}") #path (*may need to be changed*)      
-    if feat is None:                       # <<< added
-        continue  
-    feat['path'] = path                   # tag the features with its source path
+    print(f"[{idx:>4}/{total}] {path}")          # progress line
+    try:
+        feat = ecg_features_one_record(
+            f"data/mimic-iv-ecg/{path}/{path[-8:]}"
+        )
+    except Exception as e:
+        failed_count += 1
+        failed_paths.append(path)                # optional
+        print(f"   └─➤ ⚠️  exception: {e}")
+        continue                                 # skip this record and carry on
+
+    if feat is None:                             # returned but unusable
+        continue
+
+    feat['path'] = path                          # tag with source path
     feature_list.append(feat)
 
+# ───────────────────────────────────────────────────────────── summary
+print(f"\nFinished: {failed_count} / {total} ECGs "
+      f"({failed_count/total:.1%}) raised exceptions and were skipped.")
+# Uncomment if you want to see which files failed
+# for p in failed_paths:
+#     print("  •", p)
 
 # 3) Combine all feature rows into one DataFrame
-features_df = pd.concat(feature_list, ignore_index=True)
+features_df = pd.concat(feature_list, ignore_index=True) if feature_list else pd.DataFrame()
 
-# 4) Merge on 'ecg_path' rather than relying on index order
+# 4) Merge on 'path'
 df_combined = df.merge(features_df, on='path', how='left')
 
-# 5) Save to a new CSVs
-df_combined.to_csv('cohort.csv', index=False)
+# 5) Save to CSV
+df_combined.to_csv('full_cohort.csv', index=False)
