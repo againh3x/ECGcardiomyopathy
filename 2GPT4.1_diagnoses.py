@@ -244,3 +244,18 @@ out = pd.DataFrame(rows)
 out.to_csv(OUT_CSV, index=False)
 print(f"\n✅ Saved results → {OUT_CSV}")
 
+
+#for after openAI diagnoses
+import pandas as pd
+df = pd.read_csv('full_cohort.csv')
+ai_df = pd.read_csv('cm_pipeline_labels.csv')
+
+df = df[df['hadm_id'].isin(ai_df['hadm_id'])]  # filter cohort to only those in classified_hadm
+print(len(df))
+df = pd.merge(df, ai_df[['hadm_id', 'Final_Label', 'Surgery']], on='hadm_id', how='left')
+print(len(df))
+df = df[df['Final_Label'] != 'neither']  # filter out rows where Final_Label is NaN
+df = df[df['Final_Label'] != 'DCM unknown']
+df.drop_duplicates(inplace=True)
+print("Final cohort size:", len(df))
+df.to_csv('full_cohort.csv', index=False)
