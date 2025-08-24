@@ -40,7 +40,7 @@ def ecg_features_one_record(rec_path: str) -> pd.DataFrame:
         return None 
     per_lead_rows = []
     all_u_peaks = []
-    # ───────── Loop over 12 leads ─────────
+    # loop over 12 leads
     for sig, lead in zip(sigs, leads):
         if len(sig) != ECG_LEN:
             raise ValueError(f"{lead}: expected {ECG_LEN} samples, got {len(sig)}")
@@ -110,7 +110,7 @@ def ecg_features_one_record(rec_path: str) -> pd.DataFrame:
             if not np.isnan(t):   at.append(abs(amp(clean, t) - baseline[i]))
             if not np.isnan(pp):  ap.append(abs(amp(clean, pp) - baseline[i]))
 
-            # --------------- durations -------------------------------------
+            # duration features
             # QRS (Qpk→Spk)
             if not np.isnan(q) and not np.isnan(s):
                 qrs_d.append(ms(s - q))
@@ -215,7 +215,7 @@ def ecg_features_one_record(rec_path: str) -> pd.DataFrame:
             wide[f"{feat}_{lead}"] = val
     df_wide = pd.DataFrame([wide])
 
-    # ───────── 4) global dispersion / variability ─────────
+    # dispersion/variability features
     df_globals = pd.DataFrame([{
         "QT_dispersion":  df_leads["dur_QT"].max()  - df_leads["dur_QT"].min(),
         "QRS_dispersion": df_leads["dur_QSpk"].max() - df_leads["dur_QSpk"].min(),
@@ -245,7 +245,7 @@ pd.set_option('display.max_columns', None)
 
 
 feature_list   = []
-failed_paths   = []        # keep the offending paths (optional)
+failed_paths   = []        
 failed_count   = 0
 total          = len(df)   # total number of ECGs
 
@@ -259,7 +259,7 @@ for idx, path in enumerate(df['path'], 1):
         failed_count += 1
         failed_paths.append(path)                # optional
         print(f"   └─➤ ⚠️  exception: {e}")
-        continue                                 # skip this record and carry on
+        continue                                 # skip this record and continue
 
     if feat is None:                             # returned but unusable
         continue
@@ -270,15 +270,11 @@ for idx, path in enumerate(df['path'], 1):
 # ───────────────────────────────────────────────────────────── summary
 print(f"\nFinished: {failed_count} / {total} ECGs "
       f"({failed_count/total:.1%}) raised exceptions and were skipped.")
-# Uncomment if you want to see which files failed
+# uncomment to see failed paths
 # for p in failed_paths:
 #     print("  •", p)
 
-# 3) Combine all feature rows into one DataFrame
+
 features_df = pd.concat(feature_list, ignore_index=True) if feature_list else pd.DataFrame()
-
-# 4) Merge on 'path'
 df_combined = df.merge(features_df, on='path', how='left')
-
-# 5) Save to CSV
 df_combined.to_csv('full_cohort.csv', index=False)
