@@ -1,138 +1,246 @@
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
 """
-Classify cardiomyopathy features in discharge notes.
+Three-stage LLM pipeline for cardiomyopathy labeling from discharge notes.
 
-• Reads /home/oai/share/discharge_notes.csv  (needs columns: hadm_id, text, Dilated)
-• Writes /home/oai/share/classified_discharge_notes.csv
+Stage 1 (all admissions):
+  → CM_label in {"HCM","DCM","Neither"}
+  → EF (float or None)
+  → q_cardiomyopathy (list of short quotes)
 
-Replace "YOUR_OPENAI_KEY" below with the real key before running.
+Stage 2 (if HCM):
+  → Obstruction in {"True","False","Unknown"} for THIS admission (echo/LVOT gradient)
+  → Surgery in {True, False}  (True only if myectomy or septal alcohol ablation DURING THIS admission)
+  → q_obstruction (list of short quotes)
+
+Stage 3 (if DCM):
+  → Ischemic in {"True","False","Unknown"} (CAD/MI/revascularization/RWMA/explicit text)
+  → q_ischemic (list of short quotes)
+
+Output CSV columns (one row per hadm_id):
+  CM_label, Obstruction, Ischemic, EF, Surgery, q_cardiomyopathy, q_obstruction, q_ischemic
+
+Input:  discharge_notes.csv  with columns: hadm_id, text
+Output: cm_pipeline_labels.csv
 """
 
-from typing import List, Optional
+from __future__ import annotations
 
 import os
+import time
+import random
+from typing import Optional, List, Literal
+
 import pandas as pd
 from pydantic import BaseModel, Field, ValidationError
 from openai import OpenAI
 
-# ---------------------------------------------------------------------#
-# 1.  OpenAI client (HARD‑CODED KEY – replace before use)
-# ---------------------------------------------------------------------#
-client = OpenAI(api_key="placeholder_key")
+# ───────────────────────────────────────────────────────────────────────────────
+# Config
+# ───────────────────────────────────────────────────────────────────────────────
+OPENAI_API_KEY = "" #placeholder      
+MODEL_NAME = "gpt-4.1"
+TEMPERATURE = 0
 
-# ---------------------------------------------------------------------#
-# 2.  Pydantic schema for the structured answer
-# ---------------------------------------------------------------------#
-class CMClassification(BaseModel):
-    cardiomyopathy: str = Field(
-        description='Exactly one of "Hypertrophic", "Dilated", "Neither"'
+MAX_RETRIES = 3
+BASE_BACKOFF = 2.0   # seconds (exponential with jitter)
+
+IN_CSV = "discharge_notes.csv"
+OUT_CSV = "cm_pipeline_labels.csv"
+
+client = OpenAI(api_key=OPENAI_API_KEY)
+
+# ───────────────────────────────────────────────────────────────────────────────
+# Stage 1 schema: CM label + EF + supporting quotes
+# ───────────────────────────────────────────────────────────────────────────────
+class Stage1Result(BaseModel):
+    CM_label: Literal["HCM", "DCM", "Neither"] = Field(
+        description="Return 'HCM' only if the note clearly indicates hypertrophic cardiomyopathy (includes echo findings or the patient's PMH); "
+                    "Return 'DCM' only if clearly dilated CM or on the echocardiogram BOTH LV dilation and reduced EF are documented; "
+                    "Else return 'Neither'."
     )
-    phenotype: str = Field(
-        description=(
-            'For HCM: "septal" | "apical" | "unknown";  '
-            'For DCM: "ischemic" | "non-ischemic" | "unknown"'
-        )
-    )
-    obstructive: Optional[str] = Field(
+    EF: Optional[float] = Field(
         default=None,
-        description=(
-            '"Obstructive" | "Non-obstructive" | '
-            '"Probably non-obstructive" | "Unknown"  (HCM only)'
-            '''“Obstructive” if LVOT gradient ≥30 mmHg at rest or clearly stated obstructive HCM or SAM + gradient.
-“Non-obstructive” if echo says no obstruction / LVOT gradient <30 or explicitly “non-obstructive.”
-“Probably non-obstructive” if echo likely shows no obstruction but wording is indirect.
-“Unknown” if no echo or no info.'''
-
-
-        ),
+        description="LVEF % as a number if reported (e.g., 25, 45, 60). Include the number from the echocardiogram taken within the the CURRENT visit. None if not clearly stated."
     )
-    surgery: bool = Field(
-        description="True if septal myectomy / EtOH ablation during THIS stay"
+    q_cardiomyopathy: List[str] = Field(
+        default_factory=list,
+        description="1–5 short verbatim quotes that support the CM_label decision (e.g., 'LV moderately dilated', 'EF 25%')."
     )
 
-# ---------------------------------------------------------------------#
-# 3.  Prompt helpers
-# ---------------------------------------------------------------------#
-BASE_PROMPT = """
-I will give you a discharge note from the hospital of this patient who was marked down for {extra} cardiomyopathy. Inspect it very carefully. The first word you return should be one of the only three options: “Hypertrophic” “Dilated” (includes Ischemic) or “Neither”. If the discharge note mentions that the patient has hypertrophic or dilated (any form of either) cardiomyopathy, then that should be the value. If there are truly zero mentions to either, it should be neither.
+STAGE1_SYSTEM = """
+You are a careful clinical information extractor. Work ONLY from the discharge note text.
+Task: Decide if the admission clearly has HCM, DCM, or Neither.
+Rules:
+- HCM: text clearly indicates hypertrophic cardiomyopathy (current admission or clear history) or echocardiogram is clearly indicative of HCM.
+- DCM: ONLY if clearly dilated cardiomyopathy (includes both ischemic DILATED and non-ischemic DILATED cardiomyopathy) or BOTH are documented: (1) LV dilation/enlargement and (2) reduced EF. If either is missing/unclear, do NOT choose DCM. Ischemic cardiomyopathy without LV dilation is NOT DCM.
+- Neither: if neither HCM nor DCM is clearly supported by the note.
 
-Now, the next value is phenotype. If the patient has hypertrophic cardiomyopathy, you will enter one of the following phenotypes: septal, apical, or unknown. If the discharge note (indirectly or directly) mentions that the hypertrophic cardiomyopathy is septal, you can mark that down for phenotype. If it is apical, likewise. If there is truly no mention or an echo was not taken in the admission to decide, put unknown. 
-
-For DCM, if Dilated is the value for cardiomyopathy, the only types I want you to consider is ischemic and non-ischemic dilated cardiomyopathy. Look for mentions in the text for each person and if Dilated is the value for CM, the phenotype should say “ischemic”, “non-ischemic”, or unknown.
-
-Now finally, the second last thing I want you to add and fill out is “Obstructive?” If the patient had an echocardiogram taken during the admission and the LVOT was obstructive, or if it is known that the HCM is obstructive, the Obstructive? value should be “Obstructive”. If it is known that the HCM is non obstructive (from an echo etc.), the value should be “Non-obstructive”. If it is truly unknown at all, “Unknown”, and if it can be inferred that it is probably non obstructive but the text doesn't fully state it or not or state the LVOT level, “Probably non-obstructive”. This only applies for HCM, DCM patients can just have their value nan. 
-
-Finally, the last thing I want you to fill out (again only applies for HCM) is “Surgery”. If the note specifically mentions that the patient had a septal alcohol ablation or a myectomy to reduce obstruction DURING THE STAY OF THE NOTE, the value should be True. This ONLY applies if they had the surgery or procedure during THIS stay, NOT in the past (if in the past then False). For all DCM this can be False. 
-
+Extract EF as a numeric percent when stated (e.g., 'EF 25% -> 25'); otherwise EF=None.
+Return 1–5 short verbatim quotes in q_cardiomyopathy that justify CM_label.
+Do not infer beyond the text. Be conservative.
 """
 
-def build_prompt(cm_hint: str) -> str:
-    extra = (
-        f"  The patient was pre‑tagged as {cm_hint} cardiomyopathy."
-        if cm_hint in {"dilated", "hypertrophic"}
-        else ""
+STAGE1_USER = "Classify cardiomyopathy for THIS admission and extract EF from the following discharge note:"
+
+# Stage 2 (HCM-only): obstruction + surgery + quotes
+
+class Stage2HCMResult(BaseModel):
+    Obstruction: Literal["True", "False", "Unknown"] = Field(
+        description="For THIS admission, based on explicit echo/LVOT documentation: "
+                    "'True' if obstructive LVOT gradient ≥30 mmHg (make sure it is LVOT) OR text clearly states any form of obstruction from the echocardiogram taken during the visit OR clear past of HOCM and NO recent contradictory non-obstructive echo findings; "
+                    "'False' if text clearly indicates no LVOT obstruction or LVOT on current echo <30 mmHg (make sure it is LVOT and not another gradient); "
+                    "'Unknown' if unclear or no echo this admission."
     )
-    return BASE_PROMPT.format(extra=extra)
-
-# ---------------------------------------------------------------------#
-# 4.  Single‑note call using the Pydantic schema
-# ---------------------------------------------------------------------#
-def classify_note(note_text: str, cm_hint: str) -> CMClassification:
-    prompt = build_prompt(cm_hint)
-
-    response = client.beta.chat.completions.parse(
-        model="gpt-4.1",
-        messages=[
-            {"role": "system", "content": prompt},
-            {"role": "user", "content": note_text},
-        ],
-        response_format=CMClassification,
-
+    Surgery: bool = Field(
+        description="True ONLY if septal myectomy or alcohol septal ablation clearly occurred DURING THIS admission. "
+                    "If not mentioned or historical only, return False."
+    )
+    q_obstruction: List[str] = Field(
+        default_factory=list,
+        description="1–5 short verbatim quotes supporting the obstruction decision (e.g., 'LVOT gradient 64 mmHg', 'No obstruction', 'mild LVOT obstruction')."
     )
 
-    return response.choices[0].message.parsed  # → CMClassification instance
+STAGE2_HCM_SYSTEM = """
+You are an information extractor for HCM admissions. Work ONLY from the discharge note text for THIS admission. The patient has hypertrophic cardiomyopathy.
+Decide LVOT obstruction status and whether a septal reduction procedure occurred during THIS admission.
+Rules:
+- Obstruction=True if LVOT gradient ≥30 mmHg (rest or provoked) or any form of obstruction is noted from the echocardiogram conducted in the visit. recent obstruction in the past is also enough for HOCM (as long as the most recent or current echo is >30 mmHg LVOT gradient).
+- Obstruction=False if text explicitly states non-obstructive HCM or LVOT gradient reported is <30 mmHg.
+- Obstruction=Unknown if no clear echo/LVOT evidence this admission.
+- Surgery=True ONLY if septal myectomy or alcohol septal ablation (ASA) occurred DURING THIS admission; else False.
+Return 1–5 short quotes in q_obstruction that justify the obstruction decision.
+"""
 
-# ---------------------------------------------------------------------#
-# 5.  CSV driver
-# ---------------------------------------------------------------------#
-def main() -> None:
-    IN_CSV  = "discharge_notes.csv"  # Path to the input CSV file
-    OUT_CSV = "classified_hadm.csv"
+STAGE2_HCM_USER = "For this HCM admission, determine obstruction and surgery status from the discharge note:"
 
-    df = pd.read_csv(IN_CSV)
-    results: List[dict] = []
+# Stage 3 (DCM-only): ischemic status + quotes
 
-    for idx, row in df.iterrows():
-        hadm_id   = row["hadm_id"]
-        note_text = str(row["text"])
-        cm_hint   = "dilated" if bool(row["Dilated"]) else "hypertrophic"
+class Stage3DCMResult(BaseModel):
+    Ischemic: Literal["True", "False", "Unknown"] = Field(
+        description="For THIS admission, is the DCM ischemic? "
+                    "True if any ischemic evidence is documented (CAD/prior MI, CABG/PCI/stents, RWMA consistent with ischemia, "
+                    "or explicit 'ischemic cardiomyopathy'); "
+                    "False if there is clear non-ischemic/idiopathic/viral/toxin documentation OR no ischemic evidence; "
+                    "Unknown only if the note is too ambiguous to tell."
+    )
+    q_ischemic: List[str] = Field(
+        default_factory=list,
+        description="1–5 short verbatim quotes supporting the ischemic decision (e.g., 'prior MI', 'CABG in 2012', 'No CAD')."
+    )
 
-     
-        parsed: CMClassification = classify_note(note_text, cm_hint)
-        payload = parsed.model_dump()
-       
+STAGE3_DCM_SYSTEM = """
+You are an information extractor for DCM admissions. Work ONLY from the discharge note text for THIS admission.
+Decide if the dilated cardiomyopathy is ischemic or not.
+Rules:
+- Ischemic=True if ANY of the following appear: CAD/prior MI documented; revascularization (CABG/PCI/stents); RWMA consistent with ischemia; explicit 'ischemic cardiomyopathy'.
+- Ischemic=False if the note is clearly non-ischemic/idiopathic/viral/toxin OR there is no ischemic evidence and is reasonably not ischemic.
+- Ischemic=Unknown if the text is ambiguous and a decision between ischemic or not ischemic is unknown.
+Return 1–5 short quotes in q_ischemic that justify your decision.
+"""
 
+STAGE3_DCM_USER = "For this DCM admission, decide if it is ischemic vs non-ischemic from the discharge note:"
 
-        results.append({"hadm_id": hadm_id, **payload})
-        print(results[-1])
+#caller
+def call_structured(schema_cls, system_prompt: str, user_prefix: str, note_text: str):
+    for attempt in range(1, MAX_RETRIES + 1):
+        try:
+            resp = client.beta.chat.completions.parse(
+                model=MODEL_NAME,
+                temperature=TEMPERATURE,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": f"{user_prefix}\n\n{note_text}"},
+                ],
+                response_format=schema_cls,
+            )
+            return resp.choices[0].message.parsed
+        except ValidationError as ve:
+            if attempt == MAX_RETRIES:
+                raise
+            time.sleep((BASE_BACKOFF ** attempt) * (1 + random.random()))
+        except Exception as e:
+            if attempt == MAX_RETRIES:
+                raise
+            time.sleep((BASE_BACKOFF ** attempt) * (1 + random.random()))
+    raise RuntimeError("LLM structured call failed after retries.")
 
-        if (idx + 1) % 50 == 0:
-            print(f"Processed {idx + 1}/{len(df)}")
+# main
 
-    pd.DataFrame(results).to_csv(OUT_CSV, index=False)
-    print(f"\n✅ Saved results → {OUT_CSV}")
+df = pd.read_csv(IN_CSV)
+if not {"hadm_id", "text"}.issubset(df.columns):
+    raise ValueError("Input CSV must contain columns: hadm_id, text")
 
-# ---------------------------------------------------------------------#
-if __name__ == "__main__":
-    main()
-    import pandas as pd
-    df = pd.read_csv('full_cohort.csv')
-    ai_df = pd.read_csv('classified_hadm.csv')
+rows = []
+total = len(df)
+
+for i, r in df.iterrows():
+    hadm_id = r["hadm_id"]
+    note = str(r["text"])
+
+    # Stage 1: CM label + EF + quotes
+    s1: Stage1Result = call_structured(Stage1Result, STAGE1_SYSTEM, STAGE1_USER, note)
+    cm_label = s1.CM_label
+    ef_value = s1.EF
+    q_cm = s1.q_cardiomyopathy or []
+
+    obstruction = ""
+    surgery = False
+    q_obstruction = []
+    ischemic = ""
+    q_ischemic = []
     
-    df = df[df['hadm_id'].isin(ai_df['hadm_id'])]  # filter cohort to only those in classified_hadm
-    print(len(df))
-    df = pd.merge(df, ai_df, on='hadm_id', how='left')
-    print(len(df))
-    
-    df.drop_duplicates(inplace=True)
-    print("Final cohort size:", len(df))
-    df.to_csv('full_cohort.csv', index=False)
+    # Stage 2: HCM subtyping
+    if cm_label == "HCM":
+        s2: Stage2HCMResult = call_structured(Stage2HCMResult, STAGE2_HCM_SYSTEM, STAGE2_HCM_USER, note)
+        obstruction = s2.Obstruction            # "True" | "False" | "Unknown"
+        surgery = bool(s2.Surgery)              # True if procedure DURING this admission
+        q_obstruction = s2.q_obstruction or []
+
+    # Stage 3: DCM subtyping
+    elif cm_label == "DCM":
+        s3: Stage3DCMResult = call_structured(Stage3DCMResult, STAGE3_DCM_SYSTEM, STAGE3_DCM_USER, note)
+        ischemic = s3.Ischemic                  # "True" | "False" | "Unknown"
+        q_ischemic = s3.q_ischemic or []
+
+    if cm_label == "HCM":
+        if obstruction == "True":
+            final_lbl = "HOCM"
+        elif obstruction == "False":
+            final_lbl = "HNCM"
+        else:
+            final_lbl = "HCM unknown"
+    elif cm_label == "DCM":
+        if ischemic == "True":
+            final_lbl = "DCM-I"
+        elif ischemic == "False":
+            final_lbl = "DCM-NI"
+        else:
+            final_lbl = "DCM unknown"
+    else:
+        final_lbl = "neither"
+    # Build row (quotes joined with | to fit CSV)
+    row = {
+        "hadm_id": hadm_id,
+        "CM_label": cm_label,
+        "Obstruction": obstruction,                          # "", "True", "False", "Unknown"
+        "Ischemic": ischemic,                                # "", "True", "False", "Unknown"
+        "EF": ef_value,                                      # float or None
+        "Surgery": surgery,                                  # bool
+        "q_cardiomyopathy": " | ".join(q_cm),
+        "q_obstruction": " | ".join(q_obstruction),
+        "q_ischemic": " | ".join(q_ischemic),
+        "Final_Label": final_lbl 
+    }
+
+    print(f"{i+1}/{total}  hadm_id={hadm_id}  final_label={final_lbl}")
+
+    rows.append(row)
+
+    if (i + 1) % 25 == 0:
+        print(f"Processed {i+1}/{total}")
+
+out = pd.DataFrame(rows)
+out.to_csv(OUT_CSV, index=False)
+print(f"\n✅ Saved results → {OUT_CSV}")
+
