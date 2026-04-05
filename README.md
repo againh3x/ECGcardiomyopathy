@@ -1,7 +1,7 @@
 <div align="center">
 <h1>An Open-Source Analysis of Cardiomyopathy Using Machine Learning and Electrocardiograms</h1>
 <p>
-  <a href="https://www.mdpi.com/2075-4418/16/5/719"><img src="https://img.shields.io/badge/Journal-Optics_Express_2026-orange?style=flat-square" alt="Diagnostics 2026"></a>
+  <a href="https://www.mdpi.com/2075-4418/16/5/719"><img src="https://img.shields.io/badge/Journal-Diagnostics_2026-orange?style=flat-square" alt="Diagnostics 2026"></a>
 </p>
 <p>
   <a href="https://www.linkedin.com/in/arda-altintepe-584b5b306/">Arda Altintepe</a><sup>1,*</sup> &nbsp;·&nbsp;
@@ -14,7 +14,7 @@
   <sup>2</sup> Ocean Cardiovascular, LLC, Toms River, NJ 08755, USA<br>
   <sup>3</sup> Department of Electrical and Computer Engineering, Princeton University, Princeton, NJ 08544, USA<br>
   <sup>4</sup> Princeton Precision Health, Princeton University, Princeton, NJ 08544, USA<br>
-  <sup>5</sup> Omenn-Darling Bioengineering Institute, Princeton University, Bioengineering Building, 35 Ivy Lane, Princeton, NJ 08540, USA
+  <sup>5</sup> Omenn-Darling Bioengineering Institute, Princeton University, Bioengineering Building, Princeton, NJ 08540, USA
 </p>
 <p><em>Diagnostics</em>, 2026</p>
 </div>
