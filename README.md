@@ -131,7 +131,7 @@ Scripts are numbered in execution order:
 
 ## Contact
 
-For questions or issues, please contact [arda_altintepe@horacemann.org].
+For questions or issues, please contact [arda.altintepe08@gmail.com].
 
 ---
 
