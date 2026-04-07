@@ -94,12 +94,37 @@ The final cohort comprises **599 patients**: 208 HCM (99 HOCM, 53 HNCM, 56 unkno
 
 ---
 
-## Repository Structure
-
-
----
-
 ## Usage
+
+### Prerequisites
+
+All data are obtained from the publicly available [MIMIC-IV](https://physionet.org/content/mimiciv/3.1/) ecosystem on PhysioNet. Access requires completing a data-use agreement. The following modules are needed:
+
+- [MIMIC-IV v3.1](https://physionet.org/content/mimiciv/3.1/) — `patients.csv.gz`, `admissions.csv.gz`, `diagnoses_icd.csv.gz`
+- [MIMIC-IV-ECG v1.0](https://physionet.org/content/mimic-iv-ecg/1.0/) — ECG waveform files and `machine_measurements.csv`, `record_list.csv`
+- [MIMIC-IV-Note v2.2](https://physionet.org/content/mimic-iv-note/2.2/) — `discharge.csv.gz`
+
+### Python Dependencies
+
+```
+pandas, numpy, scipy, scikit-learn, xgboost, wfdb, neurokit2, 
+statsmodels, pydantic, openai, matplotlib, tqdm
+```
+
+### Running the Pipeline
+
+Scripts are numbered in execution order:
+
+1. **`1initial_preprocessing.py`** — Builds the initial cohort from ICD codes, links ECGs, and extracts discharge notes.
+2. **`2GPT4.1_diagnoses.py`** — Runs the LLM diagnosis pipeline on discharge notes (requires an OpenAI API key) and merges refined labels back into the cohort.
+3. **`4ECG_features.py`** — Extracts standard ECG features from WFDB waveform records for the full cohort.
+4. **`4VCG_features.py`** — Extracts vectorcardiogram features using the Kors regression matrix and SVD-based loop analysis.
+5. **`6final_preprocessing.py`** — Selects one ECG per patient, encodes demographics, and assembles the final feature matrix.
+6. **`8controls(visual).py`** — Extracts and processes 500 electrically normal control ECGs using the same feature pipeline (used for visual comparison only).
+7. **`9machine_learning.py`** — Trains and evaluates Logistic Regression and XGBoost classifiers; generates ROC and PR curve figures.
+8. **`stat.py`** — Runs Mann–Whitney U and Fisher exact tests with FDR correction across all features.
+
+> **Note:** Because MIMIC-IV is distributed under a data-use agreement, raw or preprocessed patient-level data cannot be redistributed in this repository. Researchers can obtain the same data free of charge by completing the [PhysioNet credentialing process](https://physionet.org/settings/credentialing/).
 
 ---
 
