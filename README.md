@@ -72,6 +72,25 @@ For HOCM vs. HNCM, a reduced set of 15 features is used due to lower sample size
 
 ## Result
 
+The final cohort comprises **599 patients**: 208 HCM (99 HOCM, 53 HNCM, 56 unknown obstruction status) and 391 DCM (250 DCM-I, 141 DCM-NI).
+
+### Key ECG Findings
+
+**HCM vs. DCM:** Both DCM subtypes exhibited lower QRS amplitudes (especially DCM-I in precordial leads) and right-posterior ventricular gradient orientation. HCM had higher amplitudes, more spatially complex and larger T-loops, and preserved leftward ventricular gradient orientation closer to normal ECGs.
+
+**HOCM vs. HNCM:** HOCM showed stronger leftward electrical activity (higher R/S ratios in all left-lateral and inferior leads) and more dipolar, or planar, QRS loops. HNCM had higher non-dipolar QRS energy, which can suggest more spatially dispersed depolarization, and had a wider angle between the first QRS and T eigenvectors.
+
+### Classification Performance
+
+| Task | Model | AUC-ROC | AUC-PR | Sensitivity | Specificity |
+|------|-------|---------|--------|-------------|-------------|
+| HCM vs. DCM-I | Logistic Regression | **0.92** | 0.88 | 0.86 | 0.84 |
+| HCM vs. DCM-I | XGBoost | 0.91 | 0.87 | 0.83 | 0.85 |
+| HCM vs. DCM-NI | Logistic Regression | **0.90** | 0.85 | 0.81 | 0.84 |
+| HCM vs. DCM-NI | XGBoost | 0.88 | 0.82 | 0.83 | 0.79 |
+| HOCM vs. HNCM | XGBoost | **0.81** | 0.89 | 0.80 | 0.74 |
+| HOCM vs. HNCM | Logistic Regression | 0.75 | 0.84 | 0.76 | 0.64 |
+
 
 ---
 
