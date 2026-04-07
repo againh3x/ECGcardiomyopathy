@@ -55,7 +55,11 @@ ICD codes alone are unreliable for cardiomyopathy subtyping. We use GPT-4.1 (tem
 
 Each classification is accompanied by supporting verbatim quotes from the discharge text.
 
+!(Figures/Figure1.png)
+
 ### 3. ECG & VCG Feature Extraction
+
+!(Figures/Figure3.png)
 
 **Standard ECG features** are computed per lead using NeuroKit2 (prominence-based delineation): median Q, R, S, T, and P amplitudes referenced to the isoelectric PR baseline; R/S and T/R amplitude ratios; QRS area; ST slope; durations (QRS, QT, QTc, JT, RR, PR, P-wave, T-wave); and Fourier-derived spectral features (mean and median frequency, skewness, kurtosis).
 
@@ -82,7 +86,14 @@ The final cohort comprises **599 patients**: 208 HCM (99 HOCM, 53 HNCM, 56 unkno
 
 Both DCM subtypes exhibited lower QRS amplitudes (especially DCM-I in precordial leads) and right-posterior ventricular gradient orientation. HCM had higher amplitudes, more spatially complex and larger T-loops, and preserved leftward ventricular gradient orientation closer to normal ECGs.
 
+!(Figures/Figure5.png)
+
 HOCM showed stronger leftward electrical activity (higher R/S ratios in all left-lateral and inferior leads) and more dipolar, or planar, QRS loops. HNCM had higher non-dipolar QRS energy, which can suggest more spatially dispersed depolarization, and had a wider angle between the first QRS and T eigenvectors.
+
+!(Figures/Figure4.png)
+
+!(Figures/Figure6.png)
+
 
 ### Classification Performance
 
@@ -95,6 +106,7 @@ HOCM showed stronger leftward electrical activity (higher R/S ratios in all left
 | HOCM vs. HNCM | XGBoost | **0.81** | 0.89 | 0.80 | 0.74 |
 | HOCM vs. HNCM | Logistic Regression | 0.75 | 0.84 | 0.76 | 0.64 |
 
+!(Figures/Figure7.png)
 ---
 
 ## Usage
