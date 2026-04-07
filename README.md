@@ -41,6 +41,8 @@ The pipeline proceeds in four stages: cohort identification, LLM-assisted label 
 
 Hospital admissions with ICD-9/10 codes for DCM, ischemic cardiomyopathy, and HCM are extracted from MIMIC-IV (v3.1). Patients are linked to their 12-lead ECGs from MIMIC-IV-ECG (v1.0), retaining only ECGs recorded during the hospital stay of diagnosis. ECGs with paced rhythms, bundle branch blocks, fascicular blocks, intraventricular conduction defects, prominent PVCs, atrial fibrillation, or atrial flutter are excluded.
 
+![Flow chart showing the study population](Figures/figure2.png)
+
 ### 2. LLM-Assisted Diagnosis Labels
 
 ICD codes alone are unreliable for cardiomyopathy subtyping. We use GPT-4.1 (temperature = 0) to extract structured labels from MIMIC-IV-Note discharge reports in a three-stage pipeline:
