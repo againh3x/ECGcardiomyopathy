@@ -74,7 +74,7 @@ Each classification is accompanied by supporting verbatim quotes from the discha
   <img src="Figures/Figure3.png" width="700"/>
 </p>
 
-**Figure 3** — All detected peaks, onsets, and offsets for a sample lead II in the study population using the prominence-based delineation method. Heartbeats from the 10-second strip are overlaid relative to R-peak locations. Note that the prominence method does not provide Q-onsets or S-offsets by default.
+**Figure 3** — All detected peaks, onsets, and offsets for a sample lead II in the study population using the prominence-based delineation method. Heartbeats from the 10-second strip are overlaid relative to R-peak locations. Note that the prominence method does not provide Q-onsets or S-offsets by default.  
 
 **Standard ECG features** are computed per lead using NeuroKit2 (prominence-based delineation): median Q, R, S, T, and P amplitudes referenced to the isoelectric PR baseline; R/S and T/R amplitude ratios; QRS area; ST slope; durations (QRS, QT, QTc, JT, RR, PR, P-wave, T-wave); and Fourier-derived spectral features (mean and median frequency, skewness, kurtosis).
 
