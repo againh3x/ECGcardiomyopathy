@@ -31,6 +31,8 @@ This repository provides the **first fully open-source, reproducible pipeline** 
 **HCM vs. ischemic cardiomyopathy with LV dilation (DCM-I)**  
 **Obstructive HCM (HOCM) vs. non-obstructive HCM (HNCM)**  
 
+> **Note on figures:** All figures in `Figures/` use the same numbering as the published paper (for example `Figure2.png` corresponds to Figure 2 in the paper).
+
 ---
 
 ## Method
@@ -41,7 +43,11 @@ The pipeline proceeds in four stages: cohort identification, LLM-assisted label 
 
 Hospital admissions with ICD-9/10 codes for DCM, ischemic cardiomyopathy, and HCM are extracted from MIMIC-IV (v3.1). Patients are linked to their 12-lead ECGs from MIMIC-IV-ECG (v1.0), retaining only ECGs recorded during the hospital stay of diagnosis. ECGs with paced rhythms, bundle branch blocks, fascicular blocks, intraventricular conduction defects, prominent PVCs, atrial fibrillation, or atrial flutter are excluded.
 
-![Flow chart showing the study population](Figures/Figure2.png)
+<p align="center">
+  <img src="Figures/Figure2.png" width="700"/>
+</p>
+
+**Figure 2** — Flow chart showing the study population. Starting from ICD-coded admissions in MIMIC-IV, patients are filtered by ECG availability, ECG quality criteria, and LLM-verified diagnosis labels to produce the final cohort of 599 patients.
 
 ### 2. LLM-Assisted Diagnosis Labels
 
@@ -55,11 +61,20 @@ ICD codes alone are unreliable for cardiomyopathy subtyping. We use GPT-4.1 (tem
 
 Each classification is accompanied by supporting verbatim quotes from the discharge text.
 
-![](Figures/Figure1.png)
+<p align="center">
+  <img src="Figures/Figure1.png" width="700"/>
+</p>
+
+**Figure 1** — Two discharge notes from unique patients with corresponding ICD codes and final GPT-4.1 labels. Left: a patient with clear non-ischemic DCM who received an incorrect HCM ICD code, corrected by GPT-4.1. Right: a patient with a history of HOCM whose current echocardiogram shows no LVOT obstruction, correctly relabeled as HNCM by GPT-4.1.
+
 
 ### 3. ECG & VCG Feature Extraction
 
-![](Figures/Figure3.png)
+<p align="center">
+  <img src="Figures/Figure3.png" width="700"/>
+</p>
+
+**Figure 3** — All detected peaks, onsets, and offsets for a sample lead II in the study population using the prominence-based delineation method. Heartbeats from the 10-second strip are overlaid relative to R-peak locations. Note that the prominence method does not provide Q-onsets or S-offsets by default.
 
 **Standard ECG features** are computed per lead using NeuroKit2 (prominence-based delineation): median Q, R, S, T, and P amplitudes referenced to the isoelectric PR baseline; R/S and T/R amplitude ratios; QRS area; ST slope; durations (QRS, QT, QTc, JT, RR, PR, P-wave, T-wave); and Fourier-derived spectral features (mean and median frequency, skewness, kurtosis).
 
@@ -86,14 +101,25 @@ The final cohort comprises **599 patients**: 208 HCM (99 HOCM, 53 HNCM, 56 unkno
 
 Both DCM subtypes exhibited lower QRS amplitudes (especially DCM-I in precordial leads) and right-posterior ventricular gradient orientation. HCM had higher amplitudes, more spatially complex and larger T-loops, and preserved leftward ventricular gradient orientation closer to normal ECGs.
 
-![](Figures/Figure5.png)
+<p align="center">
+  <img src="Figures/Figure5.png" width="700"/>
+</p>
+
+**Figure 5** — Kernel density estimate (KDE) plots of six ECG-derived features across non-ischemic DCM (DCM-NI), ischemic DCM (DCM-I), hypertrophic cardiomyopathy (HCM), and 500 electrically normal ECGs.
 
 HOCM showed stronger leftward electrical activity (higher R/S ratios in all left-lateral and inferior leads) and more dipolar, or planar, QRS loops. HNCM had higher non-dipolar QRS energy, which can suggest more spatially dispersed depolarization, and had a wider angle between the first QRS and T eigenvectors.
 
-![](Figures/Figure4.png)
+<p align="center">
+  <img src="Figures/Figure4.png" width="700"/>
+</p>
 
-![](Figures/Figure6.png)
+**Figure 4** — Kernel density estimate (KDE) plots of three ECG-derived features between obstructive and non-obstructive hypertrophic cardiomyopathy.
 
+<p align="center">
+  <img src="Figures/Figure6.png" width="700"/>
+</p>
+
+**Figure 6** — Representative vectorcardiograms for normal, HCM, DCM-I, and DCM-NI patients. The QRS loop is shown in blue and the T-loop in orange. The ventricular gradient (VG) vector is marked in green for the horizontal and sagittal projections. Both DCM patients show smaller loops and VG vectors with higher 3D elevation and azimuth angles compared to HCM and normal patients.
 
 ### Classification Performance
 
