@@ -27,9 +27,9 @@ Dilated cardiomyopathy (DCM) and hypertrophic cardiomyopathy (HCM) are common he
 
 This repository provides the **first fully open-source, reproducible pipeline** for ECG-based cardiomyopathy classification, built entirely on the publicly available [MIMIC-IV](https://physionet.org/content/mimiciv/3.1/) database. We combine standard ECG amplitude and duration features with advanced vectorcardiogram (VCG) spatial features derived via the Kors regression matrix to distinguish:
 
-**HCM vs. non-ischemic DCM (DCM-NI)**
-**HCM vs. ischemic cardiomyopathy with LV dilation (DCM-I)**
-**Obstructive HCM (HOCM) vs. non-obstructive HCM (HNCM)**
+**HCM vs. non-ischemic DCM (DCM-NI)**  
+**HCM vs. ischemic cardiomyopathy with LV dilation (DCM-I)**  
+**Obstructive HCM (HOCM) vs. non-obstructive HCM (HNCM)**  
 
 ---
 
