@@ -107,6 +107,13 @@ Both DCM subtypes exhibited lower QRS amplitudes (especially DCM-I in precordial
 
 **Figure 5** — Kernel density estimate (KDE) plots of six ECG-derived features across non-ischemic DCM (DCM-NI), ischemic DCM (DCM-I), hypertrophic cardiomyopathy (HCM), and 500 electrically normal ECGs.
 
+<p align="center">
+  <img src="Figures/Figure6.png" width="700"/>
+</p>
+
+**Figure 6** — Representative vectorcardiograms for normal, HCM, DCM-I, and DCM-NI patients. The QRS loop is shown in blue and the T-loop in orange. The ventricular gradient (VG) vector is marked in green for the horizontal and sagittal projections. Both DCM patients show smaller loops and VG vectors with higher 3D elevation and azimuth angles compared to HCM and normal patients.
+
+
 HOCM showed stronger leftward electrical activity (higher R/S ratios in all left-lateral and inferior leads) and more dipolar, or planar, QRS loops. HNCM had higher non-dipolar QRS energy, which can suggest more spatially dispersed depolarization, and had a wider angle between the first QRS and T eigenvectors.
 
 <p align="center">
@@ -114,12 +121,6 @@ HOCM showed stronger leftward electrical activity (higher R/S ratios in all left
 </p>
 
 **Figure 4** — Kernel density estimate (KDE) plots of three ECG-derived features between obstructive and non-obstructive hypertrophic cardiomyopathy.
-
-<p align="center">
-  <img src="Figures/Figure6.png" width="700"/>
-</p>
-
-**Figure 6** — Representative vectorcardiograms for normal, HCM, DCM-I, and DCM-NI patients. The QRS loop is shown in blue and the T-loop in orange. The ventricular gradient (VG) vector is marked in green for the horizontal and sagittal projections. Both DCM patients show smaller loops and VG vectors with higher 3D elevation and azimuth angles compared to HCM and normal patients.
 
 ### Classification Performance
 
