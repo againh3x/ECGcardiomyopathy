@@ -63,8 +63,8 @@ The total feature set comprises **14 lead-specific amplitude and Fourier feature
 
 Two classifiers are evaluated for each binary task with 5-fold stratified cross-validation:
 
-- **L1-penalized Logistic Regression** (C = 0.1, liblinear solver, balanced class weights)
-- **XGBoost** (200 trees, max depth 4, learning rate 0.05)
+**L1-penalized Logistic Regression** (C = 0.1, liblinear solver, balanced class weights)
+**XGBoost** (200 trees, max depth 4, learning rate 0.05)
 
 For HOCM vs. HNCM, a reduced set of 15 features is used due to lower sample size. Performance is reported as AUC-ROC, AUC-PR, and sensitivity/specificity at the Youden threshold.
 
