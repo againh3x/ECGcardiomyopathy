@@ -45,9 +45,9 @@ Hospital admissions with ICD-9/10 codes for DCM, ischemic cardiomyopathy, and HC
 
 ICD codes alone are unreliable for cardiomyopathy subtyping. We use GPT-4.1 (temperature = 0) to extract structured labels from MIMIC-IV-Note discharge reports in a three-stage pipeline:
 
-1. **Stage 1** — Classify each admission as HCM, DCM (echocardiogram-verified LV dilation + reduced EF), or Neither, and extract the reported LVEF.
-2. **Stage 2 (HCM only)** — Determine LVOT obstruction status (HOCM / HNCM / Unknown) and whether a septal reduction procedure occurred during the admission.
-3. **Stage 3 (DCM only)** — Determine ischemic status (DCM-I / DCM-NI / Unknown) based on documented CAD, prior MI, revascularization, or explicit ischemic terms.
+  **Stage 1** — Classify each admission as HCM, DCM (echocardiogram-verified LV dilation + reduced EF), or Neither, and extract the reported LVEF.  
+  **Stage 2 (HCM only)** — Determine LVOT obstruction status (HOCM / HNCM / Unknown) and whether a septal reduction procedure occurred during the admission.  
+  **Stage 3 (DCM only)** — Determine ischemic status (DCM-I / DCM-NI / Unknown) based on documented CAD, prior MI, revascularization, or explicit ischemic terms.  
 
 Each classification is accompanied by supporting verbatim quotes from the discharge text.
 
